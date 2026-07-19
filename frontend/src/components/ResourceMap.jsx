@@ -50,25 +50,53 @@ export default function ResourceMap() {
   });
 
   const [matches, setMatches] = useState([]);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Simulate AI Matchmaking Algorithm
+  // AI Matchmaking Algorithm
   useEffect(() => {
-    // A simple logic tying them together based on types for demo purposes
-    const newMatches = nodes.waste.map(w => {
-       const buyer = nodes.buyers.find(b => b.accepts === w.type);
-       if (buyer) {
-           return {
-               id: `match-${w.id}-${buyer.id}`,
-               positions: [w.pos, buyer.pos],
-               distance: calculateDistance(w.pos, buyer.pos),
-               waste: w,
-               buyer: buyer
-           };
-       }
-       return null;
-    }).filter(Boolean);
-    
-    setMatches(newMatches);
+    const fetchLogistics = async () => {
+      setIsOptimizing(true);
+      setError(null);
+      try {
+        const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        const response = await fetch(`${backendUrl}/api/optimize-logistics`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wasteNodes: nodes.waste, buyerNodes: nodes.buyers })
+        });
+        
+        if (!response.ok) throw new Error("Failed to optimize logistics");
+        
+        const data = await response.json();
+        
+        // Map the backend AI matches back to our leaflet positions
+        const mappedMatches = data.matches.map(match => {
+            const waste = nodes.waste.find(w => w.id === match.waste_id);
+            const buyer = nodes.buyers.find(b => b.id === match.buyer_id);
+            if(waste && buyer) {
+                return {
+                    id: `match-${waste.id}-${buyer.id}`,
+                    positions: [waste.pos, buyer.pos],
+                    waste,
+                    buyer,
+                    reasoning: match.reasoning,
+                    efficiency: match.efficiency_score
+                }
+            }
+            return null;
+        }).filter(Boolean);
+
+        setMatches(mappedMatches);
+      } catch (err) {
+        console.error(err);
+        setError("AI routing unavailable. Ensure backend is running.");
+      } finally {
+        setIsOptimizing(false);
+      }
+    };
+
+    fetchLogistics();
   }, []);
 
   // Haversine formula (mocked simple distance for demo)
@@ -94,6 +122,19 @@ export default function ResourceMap() {
               </div>
           </div>
       </div>
+
+      {isOptimizing && (
+          <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--primary)', padding: '0.5rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+              <span className="animate-pulse" style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary)' }}></span>
+              AI optimizing green supply chain routes...
+          </div>
+      )}
+      
+      {error && (
+          <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.5rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.9rem' }}>
+              {error}
+          </div>
+      )}
       
       <div className="map-wrapper">
         <MapContainer 
@@ -143,10 +184,17 @@ export default function ResourceMap() {
                 opacity={0.7}
              >
                  <Popup>
-                    <div style={{ color: '#000' }}>
-                        <h4 style={{ margin: '0 0 5px 0', color: '#059669' }}>Optimal Route Identified</h4>
-                        <p style={{ margin: 0 }}>Transferring {match.waste.qty} of {match.waste.type}</p>
-                        <p style={{ margin: 0 }}>From {match.waste.city} to {match.buyer.city}</p>
+                    <div style={{ color: '#000', maxWidth: '250px' }}>
+                        <h4 style={{ margin: '0 0 5px 0', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Target size={14}/> AI Optimal Route
+                        </h4>
+                        <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem' }}>Transferring {match.waste.qty} of {match.waste.type} from {match.waste.city} to {match.buyer.city}</p>
+                        <div style={{ background: '#f0fdf4', padding: '8px', borderRadius: '4px', border: '1px solid #bbf7d0', fontSize: '0.85rem' }}>
+                            <strong>Reasoning:</strong> {match.reasoning}
+                        </div>
+                        <div style={{ marginTop: '8px', fontWeight: 'bold', color: '#166534', fontSize: '0.85rem' }}>
+                            Efficiency Score: {match.efficiency}/100
+                        </div>
                     </div>
                  </Popup>
              </Polyline>
